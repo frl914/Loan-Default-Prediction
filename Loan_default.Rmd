@@ -1,0 +1,943 @@
+---
+title: "Modelo de Classificação de Bons e Maus Pagadores"
+author: "Fabio Ribeiro Leal"
+date: "29 de setembro de 2020"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+## Descrição do projeto
+Projeto realizado utilizando o banco de dados de um suposto banco tcheco. O objetivo é classificar os clientes do banco entre *bons* e *maus pagadores* para avaliação de concessão de crédito.
+
+O modelo proposto utilizou os dados dos clientes objetivando prever se eles pagarão os empréstimos da tabela *loan*, para tanto, foram utilizadas variáveis das outras tabelas(*trans*, *account*, *client*, *order*, *disp*, *district* e *card*), assim como, na tentativa de captar melhor a tendência de pagamento para cada cliente, foram criadas novas variáveis com base nas já existentes no banco original. O algoritmo de classificação escolhido para o projeto foi a regressão logística. A tabela *loan*, que possui a variável resposta, contém 682 observações, assim a divisão dos dados entre treino e teste deu-se da seguinte forma: foram considerados 70% dos dados da tabela *loan* para a base de treino e 30% para a base de teste. Contudo esta divisão não se deu de forma aleatória, foi estabelecida uma data de corte para os contratos de empréstimos, utilizando como limite a data do primeiro pagamento do empréstimo, já que precisamos de pelo menos um pagamento para formar a nossa variável resposta. Com base na proporcionalidade acima citada, foi fixada a data de corte no dia 31/10/1997, utilizando esse limite para a base treino e os dados com datas posteriores para base teste. A decisão de dividir a base respeitando a temporalidade, e não fazendo de forma aleatória, deve-se ao fato de respeitarmos a utilização de dados passados para prever o futuro, assim foram utilizados os dados das outras tabelas até essa data de corte(31/10/1997), portanto foi simulada a execução do modelo como se estivéssemos em novembro de 1997. O *training set* foi composto pelos clientes da tabela *loan* que tinham algum vencimento de parcela até 31/10/1997 e seus respectivos dados derivados das outras tabelas. O *test set* foi formado pelos clientes da tabela *loan* que não possuiam vencimentos até 31/10/1997 e portanto foi utilizado o dado futuro de pagamento ou não para a aferição da acurácia do modelo. Despois de treinado, o modelo de classificação foi avaliado comparando a predição de pagamento para os contratos feitos a partir de outubro de 1997 com o respectivo dado verdadeiro. Dessa forma, o projeto tornou-se mais realista e foi diminuido o risco de contaminação do *training set*, ou seja, vazamento de informação do *test set* para o *training set*.
+
+
+### Estrutura do dataset e relacionamentos.
+
+
+![Caption for the picture.](C:/Users/FABIO/Desktop/Projetos/Czech/czech1.jpg)
+
+#### Descrição das tabelas.
+#### client: descreve características dos clientes.
+#### account: descreve caracteísticas das contas.
+#### disposition: relaciona as contas a cada cliente.
+#### card: descreve os cartões emitidos para cada conta.
+#### district: descreve características demográficas de cada distrito.
+#### order: descreve características das ordens de pagamento.
+#### trans: descreve as transações realizadas por cada conta.
+#### loan: descreve empréstimos concedidos para cada conta.
+
+
+### Importação dos arquivos.
+```{r,warning=FALSE}
+setwd("C:/Users/FABIO/Desktop/Projetos/Czech/Czech_data")
+getwd()
+data.table::fread("loan.asc", sep = ";") -> loan
+data.table::fread("trans.asc", sep = ";") -> trans
+data.table::fread("card.asc", sep = ";") -> card
+data.table::fread("client.asc", sep = ";") -> client
+data.table::fread("account.asc", sep = ";") -> account
+data.table::fread("disp.asc", sep = ";") -> disp
+data.table::fread("district.asc", sep = ";") -> district
+data.table::fread("order.asc", sep = ";") -> order
+```
+
+```{r}
+head(loan)
+```
+
+```{r}
+str(loan)
+```
+
+```{r}
+head(trans)
+```
+
+```{r}
+str(trans)
+```
+
+```{r}
+head(card)
+```
+
+```{r}
+str(card)
+```
+
+```{r}
+head(client)
+```
+
+```{r}
+str(client)
+```
+
+```{r}
+head(account)
+```
+
+```{r}
+str(account)
+```
+
+```{r}
+head(disp)
+```
+
+```{r}
+str(disp)
+```
+
+```{r}
+head(district)
+```
+
+```{r}
+str(district)
+```
+
+```{r}
+head(order)
+```
+
+```{r}
+str(order)
+```
+
+### Ajustes na tabela *loan*.
+
+```{r, warning=FALSE}
+library(lubridate)
+loan$date <- ymd(loan$date)
+head(loan$date)
+```
+
+```{r, warning=FALSE}
+loan$first_pay <- loan$date + days(30)
+head(loan)
+```
+
+```{r,warning=FALSE}
+loan$last_pay <- loan$date + months(loan$duration)
+head(loan)
+```
+
+#### Transformação da variável resposta de A, B, C e D para 0 ou 1.
+### 0 <- pagou o empréstimo
+### 1 <- não pagou o empréstimo
+
+```{r}
+loan$target <- ifelse(loan$status=="A",0,
+                         ifelse(loan$status=="B",1,
+                                ifelse(loan$status=="C",0,
+                                       ifelse(loan$status=="D",1,"NA"))))
+head(loan)
+```
+
+![Caption for the picture.](C:/Users/FABIO/Desktop/Projetos/Czech/czech2.jpg)
+
+```{r}
+682*0.7 -> cut_off_date
+loan$first_pay <- sort(loan$first_pay)
+loan$first_pay[cut_off_date]
+```
+
+
+```{r}
+nrow(loan[first_pay<='1997-10-31'])
+nrow(loan[first_pay>'1997-10-31'])
+```
+
+#### A data de corte foi estipulada no dia 31/10/1997.
+
+### Ajustes na tabela *account*.
+
+#### Tradução para o português dos termos em tcheco da coluna frequency.
+
+#### Verificação dos termos a serem traduzidos.
+```{r}
+table(account$frequency)
+```
+
+#### Sentença IF para a tradução.
+
+```{r}
+account$frequency <- ifelse(account$frequency=="POPLATEK MESICNE", "EXTRATO MENSAL",
+                            ifelse(account$frequency=="POPLATEK TYDNE", "EXTRATO SEMANAL",
+                                   ifelse(account$frequency=="POPLATEK PO OBRATU","EXTRATO DEPOIS DE TRANSAÇÃO",NA)))
+```
+
+```{r}
+head(account)
+```
+
+#### Ajuste da data.
+
+```{r, warning=FALSE}
+library(lubridate)
+account$date <- lubridate::ymd(account$date)
+```
+
+```{r}
+min(account$date)
+max(account$date)
+```
+
+```{r}
+head(account)
+```
+
+#### Filtragem das contas abertas até 31/10/1997 para respeitar a data de corte.
+
+```{r, warning=FALSE}
+library(dplyr)
+account_10_97 <- filter(account, date <= 19971031)
+```
+
+
+#### Criação da variável tempo de conta, que corresponde a quantidade de meses a partir da abertura da conta até a data de corte.
+
+```{r}
+account_10_97$account_time<-interval(account_10_97$date, ymd(19971101)) %/% months(1)
+```
+
+```{r}
+head(account_10_97)
+```
+
+### Ajustes na tabela *trans*.
+
+#### Ajuste da data.
+
+```{r}
+trans$date <- ymd(trans$date)
+```
+
+#### Tradução para o português dos termos da coluna type.
+
+#### Sentença IF para a tradução.
+
+```{r}
+trans$type <- ifelse(trans$type=="PRIJEM","CRÉDITO",
+                     ifelse(trans$type==" VYDAJ","SAQUE","SAQUE EM DINHEIRO"))
+```
+
+#### Tradução para o português dos termos da coluna operation.
+
+#### Sentença IF para a tradução.
+
+```{r}
+trans$operation <- ifelse(trans$operation=="PREVOD NA UCET","ENVIO PARA OUTRO BANCO",
+                          ifelse(trans$operation=="PREVOD Z UCTU","RECEBIMENTO DE OUTRO BANCO",
+                                 ifelse(trans$operation=="VKLAD","CRÉDITO EM DINHEIRO",
+                                        ifelse(trans$operation=="VYBER","SAQUE EM DINHEIRO",
+                                               ifelse(trans$operation=="VYBER KARTOU","SAQUE DO CARTÃO DE CRÉDITO",NA)))))
+```
+
+#### Tradução para o português dos termos da coluna k_symbol.
+
+#### Sentença IF para a tradução.
+
+```{r}
+trans$k_symbol <- ifelse(trans$k_symbol=="DUCHOD","PENSÃO POR IDADE",
+                         ifelse(trans$k_symbol=="POJISTNE","PAGAMENTO DE SEGURO",
+                                ifelse(trans$k_symbol=="SANKC. UROK","PENALIZAÇÃO DE JUROS SE CONTA NEGATIVA",
+                                       ifelse(trans$k_symbol=="SIPO","DOMÉSTICO",
+                                              ifelse(trans$k_symbol=="SLUZBY","PAGAMENTO POR EXTRATO",
+                                                     ifelse(trans$k_symbol=="UROK","JUROS CREDITADOS",
+                                                            ifelse(trans$k_symbol=="UVER","PAGAMENTO DE EMPRÉSTIMO",NA)))))))
+```
+
+```{r}
+head(trans)
+```
+
+#### Exploração das transações da tabela para tentar criar variáveis que possam explicar o comportamento dos clientes com relação ao pagamento de dívida.
+
+#### Ajuste do período da tabela *trans* de acordo com a data de corte.
+
+```{r}
+library(dplyr)
+trans_10_97 <- filter(trans, date <= as.Date("1997-10-31"))
+```
+
+```{r}
+str(trans_10_97)
+```
+
+#### Totalização do total movimentado por conta.
+
+```{r}
+trans_amount <- group_by(trans_10_97,account_id) %>% summarise(total_amount=sum(amount))
+head(trans_amount)
+```
+
+#### Calculo do saldo médio das contas.
+
+```{r}
+trans_balance <- group_by(trans_10_97,account_id) %>% summarise(balance_mean=mean(balance))
+head(trans_balance)
+```
+
+#### Join das tabelas *trans_amount* e *trans_balance*.
+
+```{r}
+trans_summary <- merge(trans_amount,trans_balance, by = "account_id", all=F)
+head(trans_summary)
+```
+
+#### Cálculo de quantas vezes a conta de cada cliente ficou negativa.
+
+```{r}
+arrange(trans_10_97, account_id) -> trans_10_97_sorted
+```
+
+```{r}
+trans_10_97_sorted$balance_neg<-ifelse(trans_10_97_sorted$balance<0,1,0)
+```
+
+```{r}
+head(filter(trans_10_97_sorted, balance_neg>0))
+```
+
+```{r}
+summarise(group_by(trans_10_97_sorted,account_id),times_neg_balance=sum(balance_neg)) -> times_neg_balance_summary
+head(times_neg_balance_summary)
+```
+
+#### Cálculo de quanto em valores cada cliente deixou a conta negativa.
+
+```{r}
+summarise(group_by(trans_10_97_sorted,account_id),amount_neg_balance=sum(-balance[balance<0])) -> amount_neg_balance_summary
+head(amount_neg_balance_summary)
+```
+
+#### Join das tabelas *trans_summary* e *times_neg_balance_summary*.
+
+```{r}
+trans_summary_1 <- merge(trans_summary, times_neg_balance_summary, by = "account_id", all=F)
+```
+
+#### Join das tabelas *trans_summary_1* e *amount_neg_balance_summary*.
+
+```{r}
+trans_summary_2 <- merge(trans_summary_1, amount_neg_balance_summary, by = "account_id", all = F)
+head(trans_summary_2)
+```
+
+### Ajustes da tabela *card*.
+#### Ajuste da data.
+
+```{r}
+card$issued <- substr(card$issued,1,6) %>% ymd()
+str(card)
+```
+
+```{r}
+card_10_97 <- filter(card,issued<= as.Date("1997-10-31"))
+```
+
+### Ajustes na tabela *client*.
+
+#### Identificação do sexo dos clientes.
+#### A coluna birth_number identifica a data de nascinemto e o sexo. As datas estão no formato yymmdd, porém no caso do sexo feminino, o número 50 foi adicionado aos meses(mm).
+#### Criação da coluna sex através da identificação dos meses nas datas.
+
+```{r}
+client$sex <- ifelse(substr(client$birth_number, 3, 4)>12,"F","M")
+```
+
+```{r}
+head(client)
+```
+
+#### Ajuste da data.
+
+```{r}
+mm_client <-substr(client$birth_number, 3, 4)
+subtract = 50
+mm_client<- as.numeric(mm_client)
+mm_client<- ifelse(mm_client>12,mm_client-subtract,mm_client)
+mm_client <- ifelse(mm_client<10,paste(0,mm_client,sep = ""),mm_client)
+yy_client <- substr(client$birth_number, 1, 2)
+dd_client <- substr(client$birth_number, 5, 6)
+client$birthday<-as.numeric(paste(yy_client,mm_client,dd_client, sep = ""))
+client$birthday <- ymd(client$birthday)
+client$birthday <-format(as.Date(client$birthday, "%y-%m-%d"), "19%y-%m-%d")
+```
+
+#### Criação da coluna idade do cliente através da coluna birthday. A idade foi calculada considerando que estamos em outubro de 1997.
+
+```{r}
+interval(client$birthday, ymd(19971101)) %/% months(1) %/% 12  -> client$age_97
+```
+
+
+```{r}
+head(client)
+```
+
+### Ajuste na tabela *order*.
+
+#### Tradução para o português dos termos da coluna k_symbol.
+
+```{r}
+order$k_symbol <- ifelse(order$k_symbol == "POJISTNE","PAGAMENTO DE SEGURO", 
+                        ifelse(order$k_symbol=="SIPO","DOMÉSTICO",
+                              ifelse(order$k_symbol=="UVER","PAGAMENTO DE EMPRÉSTIMO",NA)))
+```
+
+```{r}
+head(order)
+```
+
+### Ajustes na tabela *dist*.
+
+#### Nomeação das colunas.
+
+```{r}
+names(district)<-c("district_id","name","region","inhabitants","municipalities<499",
+                   "municipalities_500_1999","municipalities_2000_9999","municipalities>10000",
+                   "cities","ratio_urbans","average_salary","unemploymant_rate_95",
+                   "unemploymant_rate_96","enterpreneurs","crimes_95","crimes_96")
+```
+
+```{r}
+head(district)
+```
+
+#### Estrutura das tabelas com as variáveis que foram criadas.
+
+![Caption for the picture.](C:/Users/FABIO/Desktop/Projetos/Czech/czech3.jpg)
+
+
+### Join das tabelas.
+#### O ojetivo foi juntar todas as variáveis que pudessem ajudar a classificar os clientes para formar o *training set*.
+
+![Caption for the picture.](C:/Users/FABIO/Desktop/Projetos/Czech/czech4.jpg)
+
+#### Join das tabelas *client* e *district*.
+
+```{r}
+client_district <- merge(client, district, by = "district_id", all.x = TRUE)
+```
+
+```{r}
+head(client_district)
+```
+
+#### Join das tabelas *client_district* e *disp*.
+
+```{r}
+client_district_disp <- merge(client_district, disp, by = "client_id", all.x = TRUE)
+```
+
+```{r}
+head(client_district_disp)
+```
+
+#### Join das tabelas *client_district_disp* e *account_97_10*.
+
+```{r}
+table(client_district_disp$type)
+```
+
+```{r}
+client_district_disp_account <- merge(client_district_disp, account_10_97, by = "account_id", all.x = T)
+```
+
+
+#### Criação da variável dependent.
+
+#### Somente os clientes com a classificação type=owner podem solicitar empréstimos, então foram identificados os clientes que possuem dependentes, pois isso pode ajudar a classificar o cliente.
+
+```{r}
+client_district_disp_account$dependent<- duplicated(client_district_disp_account$account_id, fromLast = T) 
+```
+
+```{r}
+head(subset(client_district_disp_account, select=c("account_id","type","dependent")))
+```
+
+```{r}
+client_district_disp_account$dependent <- ifelse(client_district_disp_account$dependent==T,1,0)
+```
+
+```{r}
+head(subset(client_district_disp_account, select=c("account_id","type","dependent")))
+```
+
+#### Join das tabelas *client_district_disp_account* e *card_10_97*.
+
+```{r}
+client_district_disp_account_card <- merge(client_district_disp_account, card_10_97, by = "disp_id", all.x = T)
+```
+
+#### Adição da variável *card* à tabela *client_district_disp_account* para identifcar os clientes que possuem cartão.
+
+```{r}
+client_district_disp_account_card$card <- ifelse(is.na(client_district_disp_account_card$type.y),0,1)
+```
+
+#### Exclusão dos clientes *disponent* da base, pois eles não podem solicitar empréstimos.
+
+```{r}
+client_district_disp_account_card_owner <- dplyr::filter(client_district_disp_account_card, type.x=="OWNER")
+```
+
+```{r}
+str(client_district_disp_account_card_owner)
+```
+
+#### Join das tabelas *trans_summary_2* e *client_district_disp_account_card_owner*.
+
+```{r}
+dataset_1 <- merge(client_district_disp_account_card_owner,trans_summary_2, by = "account_id", all.x = T)
+```
+
+```{r}
+str(dataset_1)
+```
+
+![Caption for the picture.](C:/Users/FABIO/Desktop/Projetos/Czech/czech5.jpg)
+
+#### Adicão da variável resposta da tabela *loan* ao *dataset_1*.
+
+```{r}
+dataset_2 <- merge(dataset_1, loan[,c("account_id","target","first_pay","amount")], by = "account_id", all = F)
+```
+
+```{r}
+length(dataset_2$client_id)
+```
+
+#### Adicão da variável ratio. Ela representa a proporção entre o valor do empréstimo e a média do saldo em conta corrente para cada cliente.
+
+```{r}
+dataset_2$ratio<-dataset_2$amount/dataset_2$balance_mean
+```
+
+```{r}
+head(dataset_2$ratio)
+```
+
+#### Verificação dos clientes no cadastro que não tiveram movimentação da conta.
+
+```{r}
+dataset_1 %>% summarise(count = sum(is.na(total_amount)))
+```
+
+#### Verificação de quantos desses clientes estão na tabela *loan*.
+
+```{r}
+filter(dataset_1, is.na(total_amount)) -> account_No_tans
+```
+
+```{r}
+nrow(merge(account_No_tans, loan, by = "account_id", all =F))
+```
+
+#### Foram identificados somente 6 clientes que não tiveram movimentação, portanto eles foram excluídos da base sem grande prejuízo de perda de dados.
+
+#### Exclusão das linhas com missing value de contas que não tiveram movimentção.
+
+```{r}
+dataset_3 <- filter(dataset_2, total_amount != is.na(total_amount))
+```
+
+```{r}
+length(dataset_3$client_id)
+```
+
+![Caption for the picture.](C:/Users/FABIO/Desktop/Projetos/Czech/czech6.jpg)
+
+### Divisão dos dados em treino e teste.
+
+```{r}
+training <- filter(dataset_3, first_pay<=as.Date("1997-10-31"))
+```
+
+```{r}
+test <- filter(dataset_3, first_pay>as.Date("1997-10-31"))
+```
+
+
+### Análise exploratória.
+
+```{r}
+library(ggplot2)
+ggplot(training, aes(age_97)) + geom_histogram(color="darkblue", fill="skyblue2",binwidth = 2) + xlab("Idade") + ylab("Contagem") + ggtitle("Histograma da Idade")
+```
+
+
+```{r} 
+ggplot(training, aes(target, fill=target)) + geom_bar() + scale_fill_manual(values=c("skyblue4","powderblue")) + xlab("Target") + ylab("Contagem") + ggtitle("Distribuição da Variável Target") + theme(legend.position="none")
+```
+
+#### O dataset está desbalanceado, um tratamento se faz necessário.
+
+```{r}
+ggplot(training, aes(target, age_97, fill=target)) + geom_boxplot() + scale_fill_manual(values=c("skyblue4","powderblue")) + xlab("Target") + ylab("Idade") + ggtitle("Boxplot da Idade vs Target") + theme(legend.position="none")
+```
+
+```{r}
+ggplot(training, aes(target, balance_mean, fill=target)) + geom_boxplot() +scale_fill_manual(values=c("skyblue4","powderblue")) + xlab("Target") + ylab("Saldo médio por cliente") + ggtitle("Boxplot do Saldo Médio vs Target") + theme(legend.position="none")
+```
+
+```{r}
+ggplot(training, aes(target, total_amount, fill=target)) + geom_boxplot() +
+scale_fill_manual(values = c("skyblue4","powderblue")) + xlab("Target") + ylab("Total movimentado por cliente") + ggtitle("Boxplot do Total Movimentado vs Target") + theme(legend.position="none")
+```
+
+#### Foram identificados outliers.
+
+#### Tratamento dos outliers. Foi utilizada a técnica de Winsorizing para limitar os valores acima do percentil 95%. Esses valores foram subistituidos pelo valor do percentil limite.
+```{r}
+out1<-sort(training$total_amount)[95*length(training$total_amount)/100]
+```
+
+```{r}
+training$total_amount<-ifelse(training$total_amount>out1,out1,training$total_amount)
+```
+
+```{r}
+ggplot(training, aes(target, total_amount, fill=target)) + geom_boxplot() +
+scale_fill_manual(values = c("skyblue4","powderblue")) + xlab("Target") + ylab("Total movimentado por cliente") + ggtitle("Boxplot do Total Movimentado vs Target") + labs(subtitle="Com Tratamento de Outliers") + theme(legend.position="none")
+```
+
+```{r}
+ggplot(training, aes(target, times_neg_balance, fill=target)) + geom_boxplot() +
+scale_fill_manual(values = c("skyblue4","powderblue")) + xlab("Target") + ylab("vezes que a conta ficou com saldo negativo") + ggtitle("Boxplot da Quantidade de Vezes que a Conta Ficou Negativa vs Target") + theme(legend.position="none")
+```
+
+#### Foram identificados outliers nessa feature também.
+
+#### Tratamento dos outliers.
+
+```{r}
+out2<-sort(training$times_neg_balance)[95*length(training$times_neg_balance)/100]
+```
+
+```{r}
+training$times_neg_balance<-ifelse(training$times_neg_balance>out2,out2,training$times_neg_balance)
+```
+
+```{r}
+ggplot(training, aes(target, times_neg_balance, fill=target)) + geom_boxplot() +
+scale_fill_manual(values = c("skyblue4","powderblue")) + xlab("Target") + ylab("vezes que a conta ficou com saldo negativo") + ggtitle("Boxplot da Quantidade de Vezes que a Conta Ficou Negativa vs Target") + labs(subtitle="Com Tratamento de Outliers") + theme(legend.position="none")
+```
+
+```{r}
+training %>% group_by(target) %>% summarise(times_neg_balance_median= median(times_neg_balance))
+```
+
+#### É importante destacar que, analisando o gráfico, é possível identificar que existe uma diferença entre os grupos com relação à variável neg_negative balance.
+
+```{r}
+ggplot(training, aes(target, amount_neg_balance, fill=target)) + geom_boxplot() +
+scale_fill_manual(values = c("skyblue4","powderblue")) + xlab("Target") + ylab("Soma do valor negativo") + ggtitle("Boxplot do Valor Total que  Cada Conta Ficou Negativa vs Target") + theme(legend.position="none")
+```
+
+#### Foram identificados outliers nessa feature também.
+
+#### Tratamento dos outliers.
+
+```{r}
+out3<-sort(training$amount_neg_balance)[99*length(training$amount_neg_balance)/100]
+```
+
+```{r}
+training$amount_neg_balance<-ifelse(training$amount_neg_balance>out3,out3,training$amount_neg_balance)
+```
+
+```{r}
+ggplot(training, aes(target, amount_neg_balance, fill=target)) + geom_boxplot() +
+scale_fill_manual(values = c("skyblue4","powderblue")) + xlab("Target") + ylab("Soma do valor negativo") + ggtitle("Boxplot do Valor Total que Cada Conta Ficou Negativa vs Target") + 
+labs(subtitle="Com Tratamento de Outliers") + theme(legend.position="none")
+```
+
+
+```{r}
+training %>% group_by(target) %>% summarise(neg_balance_amount = median(amount_neg_balance))
+```
+
+#### É válido destacar que, analisando o gráfico, é possível identificar que também existe uma diferença entre os grupos com relação à variável amount_neg_balance.
+
+```{r}
+ggplot(training, aes(target, account_time, fill=target)) + geom_boxplot() +
+scale_fill_manual(values=c("skyblue4","powderblue")) + xlab("Target") + ylab("Tempo de conta") + ggtitle("Boxplot do Tempo de Conta vs Target") + theme(legend.position="none")  
+```
+
+```{r}
+ggplot(training, aes(target, card, fill=target)) + geom_bar(stat = 'identity') +
+scale_fill_manual(values=c("skyblue4","powderblue")) + xlab("Target") + ylab("Possui cartão") + ggtitle("Distribuição dos Clientes que Possuem Cartão vs Target") + theme(legend.position="none")
+```
+
+```{r}
+ggplot(training, aes(target, dependent, fill=target)) + geom_bar(stat = 'identity') +
+scale_fill_manual(values=c("skyblue4","powderblue")) + xlab("Target") + ylab("Possui dependente") + ggtitle("Distribuição dos Clientes que Possuem Dependente vs Target") + theme(legend.position="none")
+
+```
+
+Analisando o gráfico, é possível identificar que também existe uma diferença entre os grupos com relação à variável dependent.
+
+```{r}
+ggplot(training, aes(target, unemploymant_rate_96, fill=target)) + geom_boxplot() + 
+scale_fill_manual(values=c("skyblue4","powderblue")) + xlab("Target") + ylab("Taxa de desemprego da região do cliente") + ggtitle("Boxplot do Desemprego vs Target") + theme(legend.position="none")  
+```
+
+
+```{r}
+table(training$target, training$district_id.x)
+```
+
+#### Não existe uma ou algumas regiões que concentrem os clientes que não pagaram os empréstimos.
+
+```{r}
+ggplot(training, aes(target, ratio, fill=target)) + geom_boxplot() +
+scale_fill_manual(values=c("skyblue4","powderblue")) + xlab("Target") + ylab("Proporção entre o valor do empréstimo e o saldo médio") + ggtitle("Boxplot da Proporção entre o Valor do Empréstimo e o Saldo Médio vs Target") + theme(legend.position="none")
+
+```
+
+#### Identificação de outliers e tratamento.
+
+```{r}
+out4<-sort(training$ratio)[95*length(training$ratio)/100]
+```
+
+```{r}
+training$ratio<-ifelse(training$ratio>out4,out4,training$ratio)
+```
+
+```{r}
+ggplot(training, aes(target, ratio, fill=target)) + geom_boxplot() +
+scale_fill_manual(values=c("skyblue4","powderblue")) + xlab("Target") + ylab("Proporção entre o valor do empréstimo e o saldo médio") + ggtitle("Boxplot da Proporção entre o Valor do Empréstimo e o Saldo Médio vs Target") + theme(legend.position="none") + labs(subtitle="Com Tratamento de Outliers")
+```
+
+
+### Testes de hipóteses.
+
+```{r}
+training$target <- as.factor(training$target)
+```
+
+```{r}
+t_test <- t.test(times_neg_balance ~ target, training, var.equal=F)
+```
+
+```{r}
+t_test
+```
+
+#### A diferença entre as médias dos dois grupos tem significância.
+
+
+```{r}
+t_test_2 <- t.test(ratio ~ target, training, var.equal=F)
+```
+
+```{r}
+t_test_2
+
+```
+
+#### A diferença entre as médias dos dois grupos tem significância.
+
+
+### Seleção das variáveis do modelo.
+
+```{r}
+training_sel <- dplyr::select(training,account_time,dependent,card,times_neg_balance,amount_neg_balance,balance_mean,ratio,first_pay,target)
+```
+
+```{r}
+test_sel <- dplyr::select(test,account_time,dependent,card,times_neg_balance,amount_neg_balance,balance_mean,ratio,first_pay,target)
+```
+
+
+### Scaling
+#### Normalização do training datase utilizando o método do mínimo e máximo.
+
+```{r}
+training_sel$account_time <- (training_sel$account_time-min(training_sel$account_time))/(max(training_sel$account_time)-min(training_sel$account_time))
+```
+
+```{r}
+training_sel$times_neg_balance <- (training_sel$times_neg_balance-min(training_sel$times_neg_balance))/(max(training_sel$times_neg_balance)-min(training_sel$times_neg_balance))
+```
+
+```{r}
+training_sel$amount_neg_balance <- (training_sel$amount_neg_balance-min(training_sel$amount_neg_balance))/(max(training_sel$amount_neg_balance)-min(training_sel$amount_neg_balance))
+```
+
+```{r}
+training_sel$balance_mean <- (training_sel$balance_mean-min(training_sel$balance_mean))/(max(training_sel$balance_mean)-min(training_sel$balance_mean))
+```
+
+```{r}
+training_sel$ratio <- (training_sel$ratio-min(training_sel$ratio))/(max(training_sel$ratio)-min(training_sel$ratio))
+```
+
+```{r}
+head(training_sel)
+```
+
+```{r}
+str(training_sel)
+```
+
+
+#### Normalizando o test dataset utilizando os mínimo e máximo do training set.
+
+```{r}
+test_sel$account_time<-(test_sel$account_time-min(training$account_time))/(max(training$account_time)-min(training$account_time))
+```
+
+```{r}
+test_sel$times_neg_balance <- (test_sel$times_neg_balance-min(training$times_neg_balance))/(max(training$times_neg_balance)-min(training$times_neg_balance))
+```
+
+```{r}
+test_sel$amount_neg_balance <- (test_sel$amount_neg_balance-min(training$amount_neg_balance))/(max(training$amount_neg_balance)-min(training$amount_neg_balance))
+```
+
+```{r}
+test_sel$balance_mean <- (test_sel$balance_mean-min(training$balance_mean))/(max(training$balance_mean)-min(training$balance_mean))
+```
+
+```{r}
+test_sel$ratio <- (test_sel$ratio-min(training$ratio))/(max(training$ratio)-min(training$ratio))
+```
+
+#### Ajuste do tipo das variáveis.
+
+```{r}
+training_sel$dependent <- as.factor(training_sel$dependent)
+training_sel$card <- as.factor(training_sel$card)
+training_sel$target <- as.factor(training_sel$target)
+test_sel$dependent <- as.factor(test_sel$dependent)
+test_sel$card <- as.factor(test_sel$card)
+test_sel$target <- as.factor(test_sel$target)
+```
+
+```{r}
+str(training_sel)
+```
+
+
+#### Tratamento dos dados desbalanceados.
+
+```{r}
+training_sel$first_pay <- NULL
+```
+
+```{r}
+test_sel$first_pay <- NULL
+```
+
+```{r}
+ggplot(training, aes(target, fill=target)) + geom_bar() + scale_fill_manual(values=c("skyblue4","powderblue")) + xlab("Target") + ylab("Contagem") + ggtitle("Distribuição da Variável Target") + theme(legend.position="none")
+```
+
+```{r, warning=FALSE}
+library(DMwR)
+training_bal <- SMOTE(target~.,training_sel,perc.over = 10000, perc.under=100)
+```
+
+```{r}
+ggplot(training_bal, aes(target, fill=target)) + geom_bar() + scale_fill_manual(values=c("skyblue4","powderblue")) + xlab("Target") + ylab("Contagem") + ggtitle("Distribuição da Variável Target") + theme(legend.position="none") + labs(subtitle="Com Balanceamento")
+```
+
+
+### Modelo de Regressão Logística.
+
+```{r, warning=FALSE}
+fit<-glm(data=training_bal, target~card+dependent+account_time+ratio+balance_mean+times_neg_balance,family=binomial())
+```
+
+
+### Predição das probabilidades.
+
+```{r}
+test_sel$pred=predict(fit, newdata = test_sel, type = "response")
+```
+
+```{r}
+pc=.15
+test_sel$class<-ifelse(test_sel$pred>pc,1,0)
+```
+
+
+### Matriz de confusão.
+
+```{r}
+library(caret)
+test_sel$class<-as.factor(test_sel$class)
+```
+
+```{r}
+cm <- confusionMatrix(data = test_sel$class, reference = test_sel$target, positive='1')
+```
+
+```{r}
+draw_confusion_matrix <- function(cm) {
+
+  layout(matrix(c(1,1,2)))
+  par(mar=c(2,2,2,2))
+  plot(c(100, 345), c(300, 450), type = "n", xlab="", ylab="", xaxt='n', yaxt='n')
+  title('CONFUSION MATRIX', cex.main=2)
+
+  # create the matrix 
+  rect(150, 430, 240, 370, col='seagreen3')
+  text(195, 435, '1', cex=1.2)
+  rect(250, 430, 340, 370, col='tomato2')
+  text(295, 435, '0', cex=1.2)
+  text(125, 370, 'Predicted', cex=1.3, srt=90, font=2)
+  text(245, 450, 'Actual', cex=1.3, font=2)
+  rect(150, 305, 240, 365, col='tomato2')
+  rect(250, 305, 340, 365, col='seagreen3')
+  text(140, 400, '1', cex=1.2, srt=90)
+  text(140, 335, '0', cex=1.2, srt=90)
+
+  # add in the cm results 
+  res <- as.numeric(cm$table)
+  text(195, 400, res[4], cex=1.6, font=2, col='white')
+  text(195, 335, res[3], cex=1.6, font=2, col='white')
+  text(295, 400, res[2], cex=1.6, font=2, col='white')
+  text(295, 335, res[1], cex=1.6, font=2, col='white')
+
+  # add in the specifics 
+  plot(c(100, 0), c(100, 0), type = "n", xlab="", ylab="", main = "DETAILS", xaxt='n', yaxt='n')
+  text(10, 85, names(cm$byClass[1]), cex=1.2, font=2)
+  text(10, 70, round(as.numeric(cm$byClass[1]), 3), cex=1.2)
+  text(30, 85, names(cm$byClass[2]), cex=1.2, font=2)
+  text(30, 70, round(as.numeric(cm$byClass[2]), 3), cex=1.2)
+  text(50, 85, names(cm$byClass[5]), cex=1.2, font=2)
+  text(50, 70, round(as.numeric(cm$byClass[5]), 3), cex=1.2)
+  text(70, 85, names(cm$byClass[6]), cex=1.2, font=2)
+  text(70, 70, round(as.numeric(cm$byClass[6]), 3), cex=1.2)
+  text(90, 85, names(cm$byClass[7]), cex=1.2, font=2)
+  text(90, 70, round(as.numeric(cm$byClass[7]), 3), cex=1.2)
+
+  # add in the accuracy information 
+  text(50, 35, names(cm$overall[1]), cex=1.5, font=2)
+  text(50, 20, round(as.numeric(cm$overall[1]), 3), cex=1.4)
+  
+  
+}  
+```
+
+```{r}
+draw_confusion_matrix(cm)
+```
+
+### Para predições de *default* de empréstimos, deve-se destacar que a métrica mais importante é o recall, pois nesse caso não devem haver falsos negativos, ou seja maus pagadores classificados como bons. Essa classificação errada, quando resulta em uma concessão de crédito equivocada, pode gerar mais prejuízo do que a rejeição de crédito para um bom pagador. 
+
