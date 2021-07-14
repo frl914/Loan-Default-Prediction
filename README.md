@@ -12,4 +12,4 @@ Dataset files: ACCOUNT.ASC, CLIENT.ASC, DISP.ASC, ORDER.ASC, TRANS.ASC, LOAN.ASC
 <br/>
 You can display the html version on the link below:
 
- https://frl914.github.io/Loan-Default-Prediction/
+https://frl914.github.io/Loan-Default-Prediction-with-R/
