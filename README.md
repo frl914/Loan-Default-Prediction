@@ -1,6 +1,6 @@
 # Loan Default Prediction Model
 
-### Model to predict loan default implemented in R.
+### Model to predict loan default implemented with R.
 ### Dataset: Berka
 ### Classification algorithm: Logistic Regression
 <br/>
