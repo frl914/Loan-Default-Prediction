@@ -1,3 +1,5 @@
+![Loan_default](https://user-images.githubusercontent.com/42385621/126042929-17597653-5ed3-469b-aaac-3d3f68aaa1ac.png)
+
 # Loan Default Prediction Model
 
 ### Model to predict loan default implemented with R.
