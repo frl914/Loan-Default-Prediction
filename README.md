@@ -1,4 +1,4 @@
-![Loan_default](https://user-images.githubusercontent.com/42385621/126043944-ad5a1ebd-771c-4b9c-93d7-7f80f1dcc672.png)
+![Loan_default](https://user-images.githubusercontent.com/42385621/126046381-dae1f684-e1db-4945-8a71-695f789f420a.png)
 
 # Loan Default Prediction Model
 
